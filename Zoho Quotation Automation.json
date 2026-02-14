@@ -1,0 +1,923 @@
+{
+  "name": "Zoho Quotes",
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.text }}",
+        "options": {
+          "systemMessage": "=You are an AI data extractor for Telegram-based quote automation.\nYour task is to read natural-language messages, identify quotation intent, extract structured quote data, separate adult/kids into distinct items if provided, enforce mandatory fields, handle customer lookup via tools, and return clean valid JSON for further processing.\n\nYou must always return ONLY JSON—no extra text.\nFor every case make use of both the tools without fail!\n\nSTEP 1 — INTENT DETECTION\nIf the message contains quote, booking, quotation, order, customer info, adult/kids counts, prices, totals, or payment-related details → proceed to STEP 2.\n\nIf unrelated (greetings, questions, general chat), return:\n{\n  \"status\": \"incomplete\",\n  \"message\": \"I am an automation agent for quote processing. Please provide quotation or booking details.\"\n}\n\nIf the user says “cancel”, “ignore”, “stop”, “not quote”, return:\n{\n  \"status\": \"incomplete\",\n  \"message\": \"Quote creation cancelled or not applicable.\"\n}\n\nSTEP 2 — CONFIRMATION LOGIC\nIf the previous system message had \"status\": \"confirmation\":\n\nIf user confirms (Yes / OK / Confirm / 👍):\n→ Skip extraction and output the final completed JSON (Case C).\n\nIf user provides corrections:\n→ Re-extract data, merge changes into previous data, and continue normally.\n\nSTEP 2 — DATA EXTRACTION RULES\nThe output must follow this schema.\n\nROOT FIELDS\nclient_name (mandatory): The customer or company name extracted from message. If missing → return \"status\": \"incomplete\" asking for it.\n\ncustomer_id: must ALWAYS be present at final stage\n  To obtain it:\n    Use 'Get Customer ID' tool to search for the customer.\n    If found → extract customer_id.\n    If NOT found → use 'Create Customer ID' tool and extract new customer_id.\n  customer_id can NEVER be empty at confirmation or completion stage.\nAlwaya use \"Get Customer ID\" and \"Create Customer ID\" tools to fetch the customer id.\n\ndiscount (mandatory): If discount is mentioned, extract the value. If not mentioned → default to 0.\n\ncreated_date:  Use the system date:\n{{ new Date().toDateTime().format('yyyy-MM-dd') }}. Output format: DD Month YYYY.\n\nexpiry_date (mandatory): Extract expiry date from message. If missing → request from user.\n\nITEM HANDLING\nIf the tour/service mentions only people, group of people or realted then no need to separate them into adults & kids.\nIf a single tour/service mentions adults & kids, create two separate items and the description should list whether for adults or kids:\n\n<Tour Name> (Adults)\n<Tour Name> (Kids)\n\nIf multiple tours/services are mentioned, create separate item groups.\n\nItem Schema:\nEach item must follow:\n{\n  \"item_no\": 1,\n  \"item_name\": \"\",\n  \"description\": \"\",\n  \"count\": 0,\n  \"unit_price\": 0,\n}\n\nIf unit price for ANY item is missing → return \"status\": \"incomplete\" asking specifically for missing prices.\n\nquote_subject: Generate a brief summary of the quotation based on message by yourself.\n\nSTEP 3 — Output Logic\nCase A — All Mandatory Fields Present (Needs Confirmation)\n\nReturn:\n{\n  \"status\": \"confirmation\",\n  \"message\": \"Please confirm the following invoice details before final creation:\",\n  \"quote_subject\": \"\",\n  \"client_name\": \"\",\n  \"discount\": \"\",\n  \"expiry_date\": \"\",\n  \"items\": [\n    {\n      \"item_no\": 1,\n      \"item_name\": \"\",\n      \"description\": \"\",\n      \"count\": 0,\n      \"unit_price\": 0\n    }\n  ]\n}\n(Add multiple items as required.)\n\nCase B — Missing Required Fields\nReturn:\n\n{\n  \"status\": \"incomplete\",\n  \"missing_fields\": [\"list_missing_fields_here\"],\n  \"message\": \"To complete the quote, please provide the missing details:\"\n}\n\nCase C — Final Confirmation\n\nIf the user confirms after a confirmation message, return:\n{\n  \"status\": \"complete\",\n  \"quote_subject\": \"\",\n  \"client_name\": \"\",\n  \"customer_id\": \"\",\n  \"discount\": \"\",\n  \"expiry_date\": \"\",\n  \"items\": [\n    {\n      \"item_no\": 1,\n      \"item_name\": \"\",\n      \"description\": \"\",\n      \"count\": 0,\n      \"unit_price\": 0\n    }\n  ]\n}\n(Add multiple items as needed.)\n\nSTEP 4 — Behavioral Rules\nAlways output pure JSON, no explanations.\nAuto-merge corrections from the user.\nDates must be normalized as DD-MM-YYYY for backend use.\nNever guess values not present in message.\nAdults/Kids must always create separate invoice line items.\nMultiple tours/services → multiple item groups.\nIf totals conflict, request clarification.\n\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        -1776,
+        880
+      ],
+      "id": "17bf9c7a-0566-4730-99f1-8037e3088368",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Telegram Trigger').item.json.message.from.id }}",
+        "contextWindowLength": 8
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        -1776,
+        1088
+      ],
+      "id": "cceff49e-d528-4b62-bcd9-7579d5b3fa65",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the raw output from the previous node (AI Agent)\nlet raw = $json[\"output\"];\n\n// Step 1: Remove code fences (```json ... ```)\nraw = raw.replace(/```json/i, \"\").replace(/```/g, \"\");\n\n// Step 2: Clean escaped newlines and extra spaces\nraw = raw.replace(/\\\\n/g, \"\").trim();\n\n// Step 3: Parse the cleaned JSON safely\nlet parsed;\ntry {\n  parsed = JSON.parse(raw);\n} catch (e) {\n  throw new Error(\"Failed to parse AI JSON output: \" + e.message + \"\\nRaw content: \" + raw);\n}\n\n// Step 4: Return structured data for next nodes\nreturn parsed;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1456,
+        880
+      ],
+      "id": "d1fb49d1-79df-4954-8b69-cc194965fbfd",
+      "name": "Parses AI Output"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.message.voice.file_id }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "string",
+                      "operation": "exists",
+                      "singleValue": true
+                    },
+                    "id": "aea8061f-77c7-402d-88f5-ba14b016a426"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Voice Message"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "397cf54a-fa95-4f43-8071-a88de15e8c8d",
+                    "leftValue": "={{ $json.message.text }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "string",
+                      "operation": "exists",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Text Message"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -2656,
+        864
+      ],
+      "id": "77ead133-a228-493a-9a71-ab3057cb5e7f",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.status.toLowerCase() }}",
+                    "rightValue": "incomplete",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "f5af7d8f-1662-45bb-b2c2-a8af405a70df"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Incomplete"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "97ff3a37-6e72-4e71-8fbc-7a88fba07976",
+                    "leftValue": "={{ $json.status.toLowerCase() }}",
+                    "rightValue": "confirmation",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Confirmation"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "ac6943ed-45da-4feb-a6dc-5631edd0ba3b",
+                    "leftValue": "={{ $json.status.toLowerCase() }}",
+                    "rightValue": "complete",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Complete"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -1248,
+        864
+      ],
+      "id": "98915338-8a87-4c8d-9fb2-e78ce34b8cc7",
+      "name": "Details-based Routing1"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.fromID }}",
+        "text": "={{ $json.message }}\n\n{{ $json.missing_fields.map(field => `• ${field}`).join(\"\\n\") }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -688,
+        592
+      ],
+      "id": "e1aae74d-4242-48bc-ba8e-888b024b02d9",
+      "name": "Send a text message3",
+      "webhookId": "4916b488-4569-484d-b3c2-264c26c94990",
+      "credentials": {
+        "telegramApi": {
+          "id": "anGoi4eQiZc2aIQK",
+          "name": "Quotes Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Message: {{ $json.message }}\n\nSubject: {{ $json.quote_subject }}\nClient Name: {{ $json.client_name }}\nDiscount: {{ $json.discount }}\nExpiry Date: {{ $json.expiry_date }}\n\n\nItem(s) Details:\n{{ $json.items.map(item => \n`• Item No: ${item.item_no}\n  Item Name: ${item.item_name}\n  Description: ${item.description}\n  Count: ${item.count}\n  Unit Price: QAR ${item.unit_price}`\n).join(\"\\n\\n\") }}",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=You are a professional data analyzer and output generator.\nYour core task is to go through the all input fields and generate an message ready to be send directly to telegram.\n\nAdjust the message according to the number of itmes present in the quotation details.\n\nTemplate message for telegram:\n\n{{ $json.message }}\n\nQuotation Subject: \" \"\nClient: \" \"\nDiscount: {{ $json.discount }} QAR\nDue Dtae: \"\"\n\nItem No: \"\"\n      Item Name: \"\"\n      Description: \"\"\n      Count: \"Count\" (\"unit price for each\" QAR each)\n      Total Amount: \"\" QAR\n\nItem No: \"\"\n      Item Name: \"\"\n      Description: \"\"\n      Count: \"Count\" (\"unit price for each\" QAR each)\n      Total Amount: \"\" QAR\n\nGrand Total: (Sum up the total amounts from every item and subtract the discount) QAR"
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        -864,
+        880
+      ],
+      "id": "67e7015c-1f1c-4a2b-b521-57c32f5deecd",
+      "name": "Basic LLM Chain1"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -544,
+        880
+      ],
+      "id": "850d4b59-990c-4f6c-bf0a-c156298c543a",
+      "name": "Send a text message1",
+      "webhookId": "aacb8468-da3e-440d-912a-6a042956ccca",
+      "credentials": {
+        "telegramApi": {
+          "id": "anGoi4eQiZc2aIQK",
+          "name": "Quotes Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "=The Quotation has been created successfully!!\n✅✅\n\nSubject: {{ $('Details-based Routing1').item.json.quote_subject }}\nClient Name: {{ $('Details-based Routing1').item.json.client_name }}\n\nCreation Date: {{ $json.estimate.date.toDateTime().format('dd-MM-yyyy') }}\nExpiry Date: {{ $('Details-based Routing1').item.json.expiry_date }}\n\nSubTotal: QAR {{ $json.estimate.sub_total }}\nDiscount: QAR {{ $json.estimate.discount_total }}\nTotal Amount: QAR {{ $json.estimate.total }}\n",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -352,
+        1216
+      ],
+      "id": "fa545066-5269-4367-b117-3cdebb84eb7b",
+      "name": "Send a text message",
+      "webhookId": "d8e69ab5-89f3-442d-9cae-54a278966109",
+      "credentials": {
+        "telegramApi": {
+          "id": "anGoi4eQiZc2aIQK",
+          "name": "Quotes Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "30f8a290-0d22-4dcd-be8b-bdc0b6fad749",
+              "name": "fromID",
+              "value": "={{ $('Telegram Trigger').item.json.message.from.id }}",
+              "type": "number"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -864,
+        592
+      ],
+      "id": "71de9b20-57c9-4dc2-b2c9-ca148755c5fd",
+      "name": "Edit Fields2"
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -2848,
+        864
+      ],
+      "id": "0afb2fe3-c033-4873-bf15-3df7f931431d",
+      "name": "Telegram Trigger",
+      "webhookId": "c2aeb4c2-24f0-4f2e-807f-646da8d45d1f",
+      "credentials": {
+        "telegramApi": {
+          "id": "anGoi4eQiZc2aIQK",
+          "name": "Quotes Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "fileId": "={{ $json.message.voice.file_id }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -2432,
+        688
+      ],
+      "id": "d2186a3a-486e-49c0-a2db-7543a79c84aa",
+      "name": "Get a file1",
+      "webhookId": "058c08b3-3e1c-4089-babc-908a1a548d89",
+      "credentials": {
+        "telegramApi": {
+          "id": "anGoi4eQiZc2aIQK",
+          "name": "Quotes Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6a16bbd1-efed-40e2-81c0-c63d124e8b25",
+              "name": "=text",
+              "value": "={{ $json.message.text }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2224,
+        880
+      ],
+      "id": "0ce1f5d4-d8b5-4715-9238-73cc0e44c9d2",
+      "name": "Edit Fields3"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "51eb49c2-15c3-4d09-ad99-276e931dd95b",
+              "name": "text",
+              "value": "={{ $json.text }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2016,
+        688
+      ],
+      "id": "44b7d4d3-f5c7-49b3-a3a6-ea77391a03a0",
+      "name": "Edit Fields4"
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "transcribe",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        -2224,
+        688
+      ],
+      "id": "cdcdbef6-3cf2-49a7-9319-b5f5fb66a4d2",
+      "name": "Transcribe a recording1",
+      "credentials": {
+        "openAiApi": {
+          "id": "fl6sxvn5M1m7Za9O",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -1920,
+        1088
+      ],
+      "id": "96dc4cb1-07f3-48c2-be96-ac9c51bc4b9e",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "fl6sxvn5M1m7Za9O",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -864,
+        1024
+      ],
+      "id": "31aa7f4f-1f9e-475d-b150-7cb7110977f9",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "fl6sxvn5M1m7Za9O",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Subject: QUOTE-{{ $json.quote_subject }}\nClient Name: {{ $json.client_name }}\nCustomer Id: {{ $json.customer_id }}\nDiscount: {{ $json.discount }}\nCreated Date: {{ new Date().toDateTime().format('yyyy-MM-dd') }}\nExpiry Date: {{ $json.due_date }}\nReference Number: QUO-{{ $json.client_name }}\n\n\nItem(s) Details:\n{{ $json.items.map(item => \n`• Item No: ${item.item_no}\n  Item Name: ${item.item_name}\n  Description: ${item.description}\n  Total Count: ${item.count}\n  Unit Price: ${item.unit_price}`\n).join(\"\\n\\n\") }}\n\n\n",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=You are a professional data analyzer and output generator.\nYour core task is to go through the all input fields and generate a JSON Body that is ready to be send directly to make a http request.\n\nAdjust the JSON Body according to the number of itmes present in the invoice details.\n\nInput the dates in format: YYYY-MM-DD\n\nIf the discount exists, that is it is not 0 (zero) and greater than 0, then include the below two fields too before the line_items.\n  \"discount\": \"\",\n  \"discount_type\": \"entity_level\",\n\nThe JSON body should be strictly in the below format based on number of items:\n\n{\n  \"customer_id\": \"\",\n  \"date\": \"\",\n  \"expiry_date\": \"\",\n  \"line_items\": [\n    {\n      \"name\": \"item_name1\",\n      \"description\": \"description1\",\n      \"rate\": unit_price1,\n      \"quantity\": total count1\n    },\n    {\n      \"name\": \"item_name2\",\n      \"description\": \"description2\",\n      \"rate\": unit_price2,\n      \"quantity\": total count2\n    }\n  ]\n}\n"
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        -864,
+        1216
+      ],
+      "id": "c1526efc-d92a-428a-b51e-c066f0ab6331",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -864,
+        1360
+      ],
+      "id": "475bc8c2-e0aa-4abc-b815-6d22076ecd0d",
+      "name": "OpenAI Chat Model2",
+      "credentials": {
+        "openAiApi": {
+          "id": "fl6sxvn5M1m7Za9O",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://invoice.zoho.com/api/v3/estimates?organization_id=907928134",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.text }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -560,
+        1216
+      ],
+      "id": "e401441a-5b96-4fa3-8ad5-7ab8184802f9",
+      "name": "Create Quote1",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "pWRcm18h4MNX8d3Q",
+          "name": "Zoho Test"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Makes an HTTP request to fetch the respective customer_id and returns the response data that includes the required customer's id.",
+        "method": "POST",
+        "url": "https://invoice.zoho.com/api/v3/contacts?organization_id=907928134",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('JSON', `So the value may be the company or client's name. Send body in below format\n{\n  \"contact_name\": \"Example Name\"\n}\n`, 'json') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        -1632,
+        1088
+      ],
+      "id": "242ca5e2-4533-466b-9375-b84eaa11e8c3",
+      "name": "Create Customer ID",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "pWRcm18h4MNX8d3Q",
+          "name": "Zoho Test"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Makes an HTTP request and returns the response data that includes the required customer's id.",
+        "url": "https://invoice.zoho.com/api/v3/contacts?organization_id=907928134",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        -1488,
+        1088
+      ],
+      "id": "3f44e480-10c2-471c-a554-e6419f1195cd",
+      "name": "Get Customer ID",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "pWRcm18h4MNX8d3Q",
+          "name": "Zoho Test"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendDocument",
+        "chatId": "=1467302010",
+        "binaryData": true,
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        48,
+        1216
+      ],
+      "id": "90dba6ec-d76b-4c91-afd8-d066258cc7ad",
+      "name": "Send a document",
+      "webhookId": "1f617911-aa36-4b81-8f41-713eec1bab6b",
+      "credentials": {
+        "telegramApi": {
+          "id": "anGoi4eQiZc2aIQK",
+          "name": "Quotes Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://invoice.zoho.com/api/v3/estimates/{{ $('Create Quote1').item.json.estimate.estimate_id }}?accept=pdf",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -144,
+        1216
+      ],
+      "id": "f8378ac5-22be-43e8-8611-5b51cbb1d2db",
+      "name": "Get Quote PDF",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "pWRcm18h4MNX8d3Q",
+          "name": "Zoho Test"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Parses AI Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parses AI Output": {
+      "main": [
+        [
+          {
+            "node": "Details-based Routing1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Get a file1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Edit Fields3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Details-based Routing1": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Basic LLM Chain1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain1": {
+      "main": [
+        [
+          {
+            "node": "Send a text message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message": {
+      "main": [
+        [
+          {
+            "node": "Get Quote PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields2": {
+      "main": [
+        [
+          {
+            "node": "Send a text message3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get a file1": {
+      "main": [
+        [
+          {
+            "node": "Transcribe a recording1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe a recording1": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields4": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields3": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Create Quote1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Quote1": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Customer ID": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Customer ID": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Quote PDF": {
+      "main": [
+        [
+          {
+            "node": "Send a document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Qatar",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "c49862ca-786f-40e7-ad08-5fe52a1aaa72",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "00e2d86f18476fa48a0bbe70e4f34123227f25798f2099883f45d509f13b7aa9"
+  },
+  "id": "ssorRvXZa4GJ9CrG",
+  "tags": []
+}
